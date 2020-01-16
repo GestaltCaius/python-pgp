@@ -46,7 +46,7 @@ message = [unZIP(m) for m in zipped_message]
 H = unRSA(message[1], Sender.keys.public)
 received_message_hash = SHA512(message[0])
 if H != received_message_hash:
-    rise exception
+    raise exception
 
 print(message[0])
 
@@ -81,3 +81,11 @@ https://cryptography.io/en/latest/hazmat/primitives/symmetric-encryption/#module
 https://stackoverflow.com/questions/10450463/how-to-zip-a-string
 
 zipfile is overkill to zip a string
+
+# PLAN du rendu (rapport)
+
+* Ce qu'on a voulu faire
+* Les pbs qu'on a rencontre
+* Les resultats
+
+On envoie code + rapport
