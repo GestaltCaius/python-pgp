@@ -70,3 +70,14 @@ D'apres ce [thread reddit](https://www.reddit.com/r/Python/comments/5gn3q8/what_
 
 Cependant on a utilise cryptography en cours donc je prefere utiliser cette lib pour me focaliser sur la comprehension des protocoles et non pas les implementations des algos.
 
+# About IV
+
+https://cryptography.io/en/latest/hazmat/primitives/symmetric-encryption/#module-cryptography.hazmat.primitives.ciphers.modes
+
+> Each time something is encrypted a new initialization_vector should be generated. Do not reuse an initialization_vector with a given key, and particularly do not use a constant initialization_vector.
+
+# zlib ou zipfile ?
+
+https://stackoverflow.com/questions/10450463/how-to-zip-a-string
+
+zipfile is overkill to zip a string
