@@ -25,6 +25,7 @@ class PGP:
             backend=default_backend()
         )
         self.__secret_key = os.urandom(256)
+        self.public_key = self.__private_key.public_key()
 
     def send_pgp_key(self, msg: str, receiver_public_key: RSAPublicKey) -> List[bytes]:
         """
@@ -99,6 +100,7 @@ class PGP:
             public_key.verify(
                 signature=signature,
                 data=msg,
+                padding=PGP.padding,
                 algorithm=PGP.hash_algorithm
             )
         except InvalidSignature:

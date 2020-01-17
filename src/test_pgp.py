@@ -1,4 +1,3 @@
-from src.pgp import *
 from src.user import *
 
 
@@ -7,6 +6,11 @@ class TestPgp:
         user = User()
 
         msg = b'Sign this please.'
-        signed_hash = sign_message(msg, user.private_key)
+        signed_hash = user.sign_message(msg)
+        assert user.verify_message(msg, signed_hash, user.public_key) is True
 
-        assert verify_message(msg, signed_hash, user.private_key.public_key()) is True
+    def test_aes_encrypt(self):
+        pass
+
+    def test_sending_pgp_key(self):
+        pass
