@@ -5,26 +5,20 @@ from typing import List, Tuple
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding, utils
+from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 
 class PGP:
-    hash_algorithm: hashes = hashes.SHA512()
-    padding: padding = padding.PSS(
-        mgf=padding.MGF1(hash_algorithm),
-        salt_length=padding.PSS.MAX_LENGTH
-    )
-
     def __init__(self):
         self.__private_key: RSAPrivateKey = rsa.generate_private_key(
             public_exponent=65537,
             key_size=4096,
             backend=default_backend()
         )
-        self.__secret_key = os.urandom(256)
+        self.__secret_key: bytes = PGP.generate_secret_key()
         self.public_key = self.__private_key.public_key()
 
     def send_pgp_key(self, msg: str, receiver_public_key: RSAPublicKey) -> List[bytes]:
@@ -42,13 +36,18 @@ class PGP:
         message: List[bytes] = [msg, signed_hash]
         zipped_message: List[bytes] = [zlib.compress(m) for m in message]
 
-        # Encrypt message
-        encrypted_message: List = [self.encrypt(m, self.__secret_key) for m in zipped_message]
+        # Encrypt message (tuple of encrypted/IV)
+        iv = os.urandom(16)
+        encrypted_message: List = [(self.encrypt(m, self.__secret_key, iv), iv) for m in zipped_message]
 
         # Encrypt secret_key using receiver's public key
         encrypted_secret_key: bytes = receiver_public_key.encrypt(
             plaintext=self.__secret_key,
-            padding=PGP.padding
+            padding=padding.OAEP(
+                padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
         )
 
         # Add encrypted secret key to message
@@ -60,11 +59,15 @@ class PGP:
         encrypted_secret_key: bytes = encrypted_message[2]
         secret_key: bytes = self.__private_key.decrypt(
             ciphertext=encrypted_secret_key,
-            padding=PGP.padding
+            padding=padding.OAEP(
+                padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
         )
 
         # Decrypt compressed message and its signed hash with secret key
-        zipped_message = [self.decrypt(m[0], m[1], secret_key) for m in encrypted_message[0:1]]
+        zipped_message = [self.decrypt(m[0], m[1], secret_key) for m in encrypted_message[0:2]]
 
         # Unzip (we get [Message, Hash])
         message = [zlib.decompress(m) for m in zipped_message]
@@ -83,8 +86,11 @@ class PGP:
         """
         signed_hash = self.__private_key.sign(
             data=plain_msg,
-            padding=PGP.padding,
-            algorithm=PGP.hash_algorithm
+            padding=padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            algorithm=hashes.SHA256()
         )
         return signed_hash
 
@@ -100,28 +106,49 @@ class PGP:
             public_key.verify(
                 signature=signature,
                 data=msg,
-                padding=PGP.padding,
-                algorithm=PGP.hash_algorithm
+                padding=padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                algorithm=hashes.SHA256()
             )
         except InvalidSignature:
             return False
         return True
 
-    def encrypt(self, data: bytes, key: bytes) -> Tuple[bytes, bytes]:
-        initialization_vector = os.urandom(16)
-        encryptor = Cipher(
-            algorithms.AES(key),
-            modes.CBC(initialization_vector),
-            backend=default_backend()
-        ).encryptor()
-        cipher_text: bytes = encryptor.update(data) + encryptor.finalize()
-        return cipher_text, initialization_vector
+    def encrypt(self, data: bytes, key: bytes, iv: bytes) -> bytes:
+        from cryptography.hazmat.primitives import padding
+
+        padder = padding.PKCS7(algorithms.AES.block_size).padder()
+        padded_data = padder.update(data)
+        padded_data += padder.finalize()
+
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        encryptor = cipher.encryptor()
+        ct = encryptor.update(padded_data) + encryptor.finalize()
+
+        return ct
 
     def decrypt(self, cipher_text: bytes, iv: bytes, key: bytes) -> bytes:
+        from cryptography.hazmat.primitives import padding
+
         decryptor = Cipher(
             algorithms.AES(key),
             modes.CBC(iv),
             backend=default_backend()
         ).decryptor()
 
-        return decryptor.update(cipher_text) + decryptor.finalize()
+        padded_data = decryptor.update(cipher_text) + decryptor.finalize()
+
+        unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+        data = unpadder.update(padded_data)
+        data += unpadder.finalize()
+
+        return data
+
+    @classmethod
+    def generate_secret_key(cls) -> bytes:
+        """
+        generates a 256bits key
+        """
+        return os.urandom(32)
