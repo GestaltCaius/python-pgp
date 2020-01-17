@@ -6,7 +6,9 @@ from .pgp import PGP
 class User(PGP):
     def __init__(self):
         PGP.__init__(self)
-        self.__secret_key = None
+
+    def receive_secret_key(self, encrypted_key, sender_public_key):
+        return self.receive_pgp_key(encrypted_key, sender_public_key)
 
     def join_room(self):
         pass

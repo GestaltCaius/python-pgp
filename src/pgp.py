@@ -13,15 +13,15 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 class PGP:
     def __init__(self):
-        self.__private_key: RSAPrivateKey = rsa.generate_private_key(
+        self._private_key: RSAPrivateKey = rsa.generate_private_key(
             public_exponent=65537,
             key_size=4096,
             backend=default_backend()
         )
-        self.__secret_key: bytes = PGP.generate_secret_key()
-        self.public_key = self.__private_key.public_key()
+        self._secret_key: bytes = PGP.generate_secret_key()
+        self.public_key = self._private_key.public_key()
 
-    def send_pgp_key(self, msg: str, receiver_public_key: RSAPublicKey) -> List[bytes]:
+    def send_pgp_key(self, msg: bytes, receiver_public_key: RSAPublicKey) -> List[bytes]:
         """
         Send `msg` using PGP method
         :param msg: secret message
@@ -29,7 +29,6 @@ class PGP:
         :return: List containing encrypted message, signed hash and secret key. Message and hash also contain their IV.
         """
         # Sign message hash
-        msg: bytes = msg.encode('utf-8')
         signed_hash: bytes = self.sign_message(msg)
 
         # Zip message and its signed hash
@@ -38,11 +37,11 @@ class PGP:
 
         # Encrypt message (tuple of encrypted/IV)
         iv = os.urandom(16)
-        encrypted_message: List = [(self.encrypt(m, self.__secret_key, iv), iv) for m in zipped_message]
+        encrypted_message: List = [(self.encrypt(m, self._secret_key, iv), iv) for m in zipped_message]
 
         # Encrypt secret_key using receiver's public key
         encrypted_secret_key: bytes = receiver_public_key.encrypt(
-            plaintext=self.__secret_key,
+            plaintext=self._secret_key,
             padding=padding.OAEP(
                 padding.MGF1(algorithm=hashes.SHA256()),
                 algorithm=hashes.SHA256(),
@@ -57,7 +56,7 @@ class PGP:
     def receive_pgp_key(self, encrypted_message: List[bytes], public_key: RSAPublicKey):
         # Get secret key used to encrypt message
         encrypted_secret_key: bytes = encrypted_message[2]
-        secret_key: bytes = self.__private_key.decrypt(
+        secret_key: bytes = self._private_key.decrypt(
             ciphertext=encrypted_secret_key,
             padding=padding.OAEP(
                 padding.MGF1(algorithm=hashes.SHA256()),
@@ -84,7 +83,7 @@ class PGP:
         :param plain_msg: to sign
         :return: signed hash of `msg`
         """
-        signed_hash = self.__private_key.sign(
+        signed_hash = self._private_key.sign(
             data=plain_msg,
             padding=padding.PSS(
                 mgf=padding.MGF1(hashes.SHA256()),

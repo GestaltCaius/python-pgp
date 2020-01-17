@@ -1,4 +1,6 @@
-class Server:
+from .pgp import PGP
 
-    def __init__(self):
-        pass
+
+class Server(PGP):
+    def send_secret_key(self, receiver_public_key):
+        return self.send_pgp_key(self._secret_key, receiver_public_key)

@@ -2,6 +2,7 @@ import os
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from src.server import Server
 from src.user import *
 
 
@@ -27,6 +28,21 @@ class TestPgp:
     def test_sending_pgp_key(self):
         user = User()
         key = b'here is my pgp key'
-        pgp_msg = user.send_pgp_key(key.decode('utf-8'), user.public_key)
+        pgp_msg = user.send_pgp_key(key, user.public_key)
         decrypted_msg = user.receive_pgp_key(pgp_msg, user.public_key)
         assert decrypted_msg == key
+
+    def test_exchanging_key(self):
+        server = Server()
+        user1 = User()
+        user2 = User()
+
+        encrypted_key = server.send_secret_key(user1.public_key)
+        key1 = user1.receive_pgp_key(encrypted_key, server.public_key)
+
+        encrypted_key = server.send_secret_key(user2.public_key)
+        key2 = user2.receive_pgp_key(encrypted_key, server.public_key)
+
+        assert key1 == key2
+
+
