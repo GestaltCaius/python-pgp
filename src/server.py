@@ -10,6 +10,8 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from pgp import PGP, PGPPacket, AESEncryptedData
 import socket
 
+from secret_message import *
+
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -48,28 +50,28 @@ if __name__ == '__main__':
             client, address = s.accept()
             print("{} connected".format(address))
 
-            logger.debug(f'Server secret key is {server._secret_key}')
             logger.info('Waiting for client messages')
             response: bytes = client.recv(4096)
-            if b'-----BEGIN PUBLIC KEY-----' in response:
-                logger.info('Sending server public key to client')
+            response: SecretMessage = pickle.loads(response)
+
+            op_code = response['op_code']
+            if op_code == OP_CODE_KEY:
+                logger.info(f"Sending server public key to user {response['user_id']}")
                 client.send(server_pem)
 
                 logger.info('Creating PGP packet to send secret key to client')
-                client_pem = response
-                print(client_pem)
-                public_key: RSAPublicKey = serialization.load_pem_public_key(
-                    client_pem,
+                client_public_key: RSAPublicKey = serialization.load_pem_public_key(
+                    response['data'],
                     backend=default_backend())
-                encrypted_key: PGPPacket = server.send_secret_key(public_key)
-                b64_packet = pickle.dumps(encrypted_key)
+                encrypted_pgp_key: PGPPacket = server.send_secret_key(client_public_key)
+                msg = pickle.dumps(encrypted_pgp_key)
 
                 logger.info('Sending PGP packet to client')
-                client.send(b64_packet)
-            elif response != b'':
-                logger.info(f'Received message: {response}')
-                response: AESEncryptedData = pickle.loads(response)
-                logger.info(f"Decrypted message is {server.decrypt(response['data'], response['iv'])}")
+                client.send(msg)
+            elif op_code == OP_CODE_MSG:
+                logger.info(f'Received encrypted message from user {response["user_id"]}')
+                encrypted_msg: AESEncryptedData = response['data']
+                logger.info(f"User#{response['user_id']}: {server.decrypt(encrypted_msg['data'], encrypted_msg['iv'])}")
     except KeyboardInterrupt:
         logger.info('Shutting down server...')
     finally:

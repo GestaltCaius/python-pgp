@@ -22,10 +22,6 @@ class PGPPacket(TypedDict):
     secret_key: bytes
 
 
-class SecretMessage(TypedDict):
-    op_code: bytes  # b'MSG' or b'KEY' to either send a message or exchange key
-    data: Any  # Encrypted message or key
-    user_id: int  # User's ID
 
 
 class PGP:

@@ -9,6 +9,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 from pgp import PGP, PGPPacket, AESEncryptedData
+from secret_message import *
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -52,7 +53,9 @@ if __name__ == '__main__':
         )
 
         logger.info('Sending our public key')
-        s.send(pem)
+        msg = SecretMessage(op_code=OP_CODE_KEY, data=pem, user_id=user.user_id)
+        msg = pickle.dumps(msg)
+        s.send(msg)
         server_public_key = s.recv(1024)
 
         logger.info("Loading server's public key")
@@ -75,15 +78,16 @@ if __name__ == '__main__':
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.connect((host, port))
             print('Type your message:\n')
-            msg: bytes = input().encode('utf-8')
+            msg = input().encode('utf-8')
 
             logger.debug(f'Encrypting message: {msg}')
             iv = os.urandom(16)
             cipher_text = user.encrypt(msg, iv)
 
-            packet: AESEncryptedData = AESEncryptedData(data=cipher_text, iv=iv)
-            packet: bytes = pickle.dumps(packet)
-            s.send(packet)
+            msg = AESEncryptedData(data=cipher_text, iv=iv)
+            msg = SecretMessage(op_code=OP_CODE_MSG, data=msg, user_id=user.user_id)
+            msg = pickle.dumps(msg)
+            s.send(msg)
             s.close()
     except KeyboardInterrupt or EOFError:
         print('Exiting chat room!')
