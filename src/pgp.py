@@ -1,6 +1,6 @@
 import os
 import zlib
-from typing import List, Tuple
+from typing import List, Tuple, TypedDict, Any
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.backends import default_backend
@@ -9,6 +9,23 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+
+class AESEncryptedData(TypedDict):
+    data: bytes
+    iv: bytes
+
+
+class PGPPacket(TypedDict):
+    signature: AESEncryptedData
+    data: AESEncryptedData
+    secret_key: bytes
+
+
+class SecretMessage(TypedDict):
+    op_code: bytes  # b'MSG' or b'KEY' to either send a message or exchange key
+    data: Any  # Encrypted message or key
+    user_id: int  # User's ID
 
 
 class PGP:
@@ -21,7 +38,7 @@ class PGP:
         self._secret_key: bytes = PGP.generate_secret_key()
         self.public_key = self._private_key.public_key()
 
-    def send_pgp_key(self, msg: bytes, receiver_public_key: RSAPublicKey) -> List[bytes]:
+    def send_pgp_key(self, msg: bytes, receiver_public_key: RSAPublicKey) -> PGPPacket:
         """
         Send `msg` using PGP method
         :param msg: secret message
@@ -32,12 +49,17 @@ class PGP:
         signed_hash: bytes = self.sign_message(msg)
 
         # Zip message and its signed hash
+
         message: List[bytes] = [msg, signed_hash]
         zipped_message: List[bytes] = [zlib.compress(m) for m in message]
 
-        # Encrypt message (tuple of encrypted/IV)
+        # Encrypt message and hash as AESEncryptedData
         iv = os.urandom(16)
-        encrypted_message: List = [(self.encrypt(m, self._secret_key, iv), iv) for m in zipped_message]
+        encrypted_message: List = [
+            AESEncryptedData(
+                data=self.encrypt(m, iv),
+                iv=iv)
+            for m in zipped_message]
 
         # Encrypt secret_key using receiver's public key
         encrypted_secret_key: bytes = receiver_public_key.encrypt(
@@ -51,11 +73,16 @@ class PGP:
 
         # Add encrypted secret key to message
         encrypted_message.append(encrypted_secret_key)
-        return encrypted_message
+        packet = PGPPacket(
+            data=encrypted_message[0],
+            signature=encrypted_message[1],
+            secret_key=encrypted_message[2]
+        )
+        return packet
 
-    def receive_pgp_key(self, encrypted_message: List[bytes], public_key: RSAPublicKey):
+    def receive_pgp_key(self, encrypted_message: PGPPacket, public_key: RSAPublicKey):
         # Get secret key used to encrypt message
-        encrypted_secret_key: bytes = encrypted_message[2]
+        encrypted_secret_key: bytes = encrypted_message.get('secret_key')
         secret_key: bytes = self._private_key.decrypt(
             ciphertext=encrypted_secret_key,
             padding=padding.OAEP(
@@ -65,8 +92,13 @@ class PGP:
             )
         )
 
+        self._secret_key = secret_key
+
         # Decrypt compressed message and its signed hash with secret key
-        zipped_message = [self.decrypt(m[0], m[1], secret_key) for m in encrypted_message[0:2]]
+        zipped_message = [
+            self.decrypt(data['data'], data['iv'])
+            for data in (encrypted_message['data'], encrypted_message['signature'])
+        ]
 
         # Unzip (we get [Message, Hash])
         message = [zlib.decompress(m) for m in zipped_message]
@@ -115,24 +147,24 @@ class PGP:
             return False
         return True
 
-    def encrypt(self, data: bytes, key: bytes, iv: bytes) -> bytes:
+    def encrypt(self, data: bytes, iv: bytes) -> bytes:
         from cryptography.hazmat.primitives import padding
 
         padder = padding.PKCS7(algorithms.AES.block_size).padder()
         padded_data = padder.update(data)
         padded_data += padder.finalize()
 
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        cipher = Cipher(algorithms.AES(self._secret_key), modes.CBC(iv), backend=default_backend())
         encryptor = cipher.encryptor()
         ct = encryptor.update(padded_data) + encryptor.finalize()
 
         return ct
 
-    def decrypt(self, cipher_text: bytes, iv: bytes, key: bytes) -> bytes:
+    def decrypt(self, cipher_text: bytes, iv: bytes) -> bytes:
         from cryptography.hazmat.primitives import padding
 
         decryptor = Cipher(
-            algorithms.AES(key),
+            algorithms.AES(self._secret_key),
             modes.CBC(iv),
             backend=default_backend()
         ).decryptor()
