@@ -36,7 +36,7 @@ class User(PGP):
         pass
 
     def prompt(self):
-        sys.stdout.write('Type your message: ')
+        sys.stdout.write('\nYou: ')
         sys.stdout.flush()
 
 
@@ -92,10 +92,10 @@ if __name__ == '__main__':
                         sys.exit()
                     else:
                         # print data
-                        data: SecretMessage = pickle.loads(data)
-                        data: AESEncryptedData = data['data']
+                        response: SecretMessage = pickle.loads(data)
+                        data: AESEncryptedData = response['data']
                         msg = user.decrypt(data['data'], data['iv'])
-                        sys.stdout.write(msg.decode('utf-8'))
+                        sys.stdout.write(f"User{response['user_id']}: {msg.decode('utf-8')}\n")
                         user.prompt()
                 # user entered a message
                 else:
