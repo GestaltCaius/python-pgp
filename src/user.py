@@ -2,6 +2,7 @@ import logging
 import os
 import pickle
 import random
+import select
 import socket
 import sys
 
@@ -34,6 +35,10 @@ class User(PGP):
     def send_msg(self):
         pass
 
+    def prompt(self):
+        sys.stdout.write('Type your message: ')
+        sys.stdout.flush()
+
 
 if __name__ == '__main__':
     host = "localhost"
@@ -41,8 +46,9 @@ if __name__ == '__main__':
     user = User()
     try:
         # Create socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((host, port))
+        user_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        user_socket.settimeout(2)
+        user_socket.connect((host, port))
         logger.info(f'User #{user.user_id} is connected to {host}:{port}')
 
         # Get secret key
@@ -55,15 +61,15 @@ if __name__ == '__main__':
         logger.info('Sending our public key')
         msg = SecretMessage(op_code=OP_CODE_KEY, data=pem, user_id=user.user_id)
         msg = pickle.dumps(msg)
-        s.send(msg)
-        server_public_key = s.recv(1024)
+        user_socket.send(msg)
+        server_public_key = user_socket.recv(4096)
 
         logger.info("Loading server's public key")
         server_pem: RSAPublicKey = serialization.load_pem_public_key(
             server_public_key,
             backend=default_backend())
 
-        pgp_packet = s.recv(4096)
+        pgp_packet = user_socket.recv(4096)
         logger.info('Decrypting secret key using PGP')
 
         packet: PGPPacket = pickle.loads(pgp_packet)
@@ -72,24 +78,39 @@ if __name__ == '__main__':
         user.receive_secret_key(packet, server_pem)
 
         logger.info('Secret key exchanged!')
-        s.close()
 
         while True:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((host, port))
-            print('Type your message:\n')
-            msg = input().encode('utf-8')
+            socket_list = [sys.stdin, user_socket]
+            # Get the list sockets which are readable
+            read_sockets, write_sockets, error_sockets = select.select(socket_list, [], [])
+            for s in read_sockets:
+                # incoming message from remote server
+                if s is user_socket:
+                    data = user_socket.recv(4096)
+                    if not data:
+                        logger.info('Disconnected from chat server')
+                        sys.exit()
+                    else:
+                        # print data
+                        data: SecretMessage = pickle.loads(data)
+                        data: AESEncryptedData = data['data']
+                        msg = user.decrypt(data['data'], data['iv'])
+                        sys.stdout.write(msg.decode('utf-8'))
+                        user.prompt()
+                # user entered a message
+                else:
+                    msg = sys.stdin.readline()
 
-            logger.debug(f'Encrypting message: {msg}')
-            iv = os.urandom(16)
-            cipher_text = user.encrypt(msg, iv)
-
-            msg = AESEncryptedData(data=cipher_text, iv=iv)
-            msg = SecretMessage(op_code=OP_CODE_MSG, data=msg, user_id=user.user_id)
-            msg = pickle.dumps(msg)
-            s.send(msg)
-            s.close()
+                    logger.debug(f'Encrypting message: {msg}')
+                    iv = os.urandom(16)
+                    cipher_text = user.encrypt(msg.encode('utf-8'), iv)
+                    msg = AESEncryptedData(data=cipher_text, iv=iv)
+                    msg = SecretMessage(op_code=OP_CODE_MSG, data=msg, user_id=user.user_id)
+                    msg = pickle.dumps(msg)
+                    user_socket.send(msg)
+                    user.prompt()
     except KeyboardInterrupt or EOFError:
         print('Exiting chat room!')
+        user_socket.close()
     finally:
         pass

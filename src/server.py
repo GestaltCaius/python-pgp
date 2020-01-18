@@ -1,6 +1,8 @@
 import json
 import logging
+import os
 import pickle
+import select
 import sys
 
 from cryptography.hazmat.backends import default_backend
@@ -21,23 +23,32 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class JSONBytesEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, (bytes, bytearray)):
-            return obj.decode('ASCII')
-        return json.JSONEncoder.default(self, obj)
-
-
 class Server(PGP):
+
+    def __init__(self):
+        PGP.__init__(self)
+        self.connection_list = []
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server_socket.bind(('', 15555))
+        self.server_socket.listen(5)
+        self.connection_list.append(self.server_socket)
+
     def send_secret_key(self, receiver_public_key):
         return self.send_pgp_key(self._secret_key, receiver_public_key)
 
+    def broadcast_msg(self, sender_socket, msg):
+        # Do not send the message to master socket and the client who has send us the message
+        for s in self.connection_list:
+            if s is not self.server_socket and s is not sender_socket:
+                try:
+                    s.send(msg)
+                except KeyboardInterrupt:
+                    s.close()
+                    self.connection_list.remove(s)
+
 
 if __name__ == '__main__':
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(('', 15555))
-
     server = Server()
     server_pem = server.public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
@@ -46,33 +57,62 @@ if __name__ == '__main__':
 
     try:
         while True:
-            s.listen(5)
-            client, address = s.accept()
-            print("{} connected".format(address))
+            read_sockets, write_sockets, error_sockets = select.select(server.connection_list, [], [])
+            for s in read_sockets:
+                # New connection
+                if s is server.server_socket:
+                    # New connection
+                    new_client_socket, addr = s.accept()
+                    server.connection_list.append(new_client_socket)
+                    logger.info(f"Client ({addr}) connected")
+                    iv = os.urandom(16)
+                    cipher_text = server.encrypt(f"Client ({addr}) is offline".encode('utf-8'), iv)
+                    msg = AESEncryptedData(data=cipher_text, iv=iv)
+                    msg = SecretMessage(op_code=OP_CODE_MSG, data=msg, user_id=-1)
+                    msg = pickle.dumps(msg)
+                    server.broadcast_msg(new_client_socket, msg)
 
-            logger.info('Waiting for client messages')
-            response: bytes = client.recv(4096)
-            response: SecretMessage = pickle.loads(response)
+                # Some incoming message from a client
+                else:
+                    # Data recieved from client, process it
+                    try:
+                        # In Windows, sometimes when a TCP program closes abruptly,
+                        # a "Connection reset by peer" exception will be thrown
+                        raw_response: bytes = s.recv(4096)
+                        if raw_response == b'':
+                            continue
+                        response: SecretMessage = pickle.loads(raw_response)
+                        op_code = response['op_code']
+                        if op_code == OP_CODE_KEY:
+                            logger.info(f"Sending server public key to user {response['user_id']}")
+                            s.send(server_pem)
 
-            op_code = response['op_code']
-            if op_code == OP_CODE_KEY:
-                logger.info(f"Sending server public key to user {response['user_id']}")
-                client.send(server_pem)
+                            logger.info('Creating PGP packet to send secret key to client')
+                            client_public_key: RSAPublicKey = serialization.load_pem_public_key(
+                                response['data'],
+                                backend=default_backend())
+                            encrypted_pgp_key: PGPPacket = server.send_secret_key(client_public_key)
+                            msg = pickle.dumps(encrypted_pgp_key)
 
-                logger.info('Creating PGP packet to send secret key to client')
-                client_public_key: RSAPublicKey = serialization.load_pem_public_key(
-                    response['data'],
-                    backend=default_backend())
-                encrypted_pgp_key: PGPPacket = server.send_secret_key(client_public_key)
-                msg = pickle.dumps(encrypted_pgp_key)
+                            logger.info('Sending PGP packet to client')
+                            s.send(msg)
 
-                logger.info('Sending PGP packet to client')
-                client.send(msg)
-            elif op_code == OP_CODE_MSG:
-                logger.info(f'Received encrypted message from user {response["user_id"]}')
-                encrypted_msg: AESEncryptedData = response['data']
-                logger.info(f"User#{response['user_id']}: {server.decrypt(encrypted_msg['data'], encrypted_msg['iv'])}")
+                        elif op_code == OP_CODE_MSG:
+                            logger.info(f'Received encrypted message from user {response["user_id"]}')
+                            server.broadcast_msg(s, raw_response)
+                    except KeyboardInterrupt:
+                        iv = os.urandom(16)
+                        cipher_text = server.encrypt(f"Client ({addr}) is offline".encode('utf-8'), iv)
+                        msg = AESEncryptedData(data=cipher_text, iv=iv)
+                        msg = SecretMessage(op_code=OP_CODE_MSG, data=msg, user_id=-1)
+                        msg = pickle.dumps(msg)
+                        server.broadcast_msg(s, msg)
+                        logger.info(f"Client ({addr}) is now offline")
+                        s.close()
+                        server.connection_list.remove(s)
+                        continue
     except KeyboardInterrupt:
         logger.info('Shutting down server...')
     finally:
-        s.close()
+        server.server_socket.close()
+
