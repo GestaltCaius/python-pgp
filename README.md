@@ -59,11 +59,11 @@ On envoie le message au destinataire. Dans notre cas, cela passera par un socket
 ```py
 # Coté destinataire
 
-# On recupère la secret key
+# On récupère la secret key
 encrypted_secret_key = encryted_message[2]
 secret_key = RSA_decrypt(encrypted_secret_key, self.private_key)
 
-# On dechiffre le message et la signature, qui sont compressés
+# On déchiffre le message et la signature, qui sont compressés
 zipped_message = [AES_decrypt(m, secret_key) for m in encrypted_message[0:2]]
 
 # On dezippe
@@ -83,7 +83,7 @@ Une fois la clé symétrique échangée via cet algorithme, on peut tout simplem
 
 # Implémentation
 
-La partie cryptographie s'est révelée être plus compliquée que prévu.
+La partie cryptographie s'est révélée être plus compliquée que prévu.
 
 En effet, je n'avais pas anticipé tous les choix et détails que j'aurai à gérer.
 
@@ -109,7 +109,7 @@ En effet, on ne peut pas juste générer un IV et le réutiliser à chaque fois.
 
 Pour le padding j'ai choisi PKCS7, car nous avions vu qu'il fallait utiliser PKCS5 en cours de cryptographie l'an dernier.
 
-Je n'ai pas choisi le même padding pour la signature RSA. Cryptography recommendait cette fois-ci PSS.
+Je n'ai pas choisi le même padding pour la signature RSA. Cryptography recommandait cette fois-ci PSS.
 
 ## Génération de nombres aléatoires
 
@@ -121,7 +121,7 @@ J'ai donc utilisé cette fonction pour générer la clé AES de 256 bits ainsi q
 
 # La messagerie
 
-J'avais sous estimé le temps que me prendrait cette partie du projet. La mise en plus du système de chat par socket a été plus longue que prévu.
+J'avais sous-estimé le temps que me prendrait cette partie du projet. La mise en plus du système de chat par socket a été plus longue que prévu.
 
 Le fichier `server.py` est un script en plus de contenir la classe Server. Celui-ci ouvre une socket et gère une pool de sockets client grâce à `select`, un équivalent crossplatform de epoll.
 Il en va de même pour le fichier `user.py` qui créer un nouvel utilisateur et se connecte au server.
@@ -146,7 +146,7 @@ User:
 3. a. Boucle infinie pour demander à l'utilisateur d'envoyer des messages
 3. b. Reception et affichage des messages des aures utilisateurs
 
-En plus de la partie epoll avec `select` pour gérer la chat room multiutilisateurs, j'ai du créer des "paquets" pour faciliter l'envoi et le traitement des messages.
+En plus de la partie epoll avec `select` pour gérer la chat room multiutilisateur, j'ai du créer des "paquets" pour faciliter l'envoi et le traitement des messages.
 
 J'ai donc créé ces dataclasses :
 
@@ -175,9 +175,9 @@ class SecretMessage(TypedDict):
 
 Les utilisateurs et le serveur communique uniquement avec des `SecretMessage`. Cela permet de facilement connaître le type de message (demande d'échange de clé ou simple message chiffré), mais également de savoir qui a émis le message grâce au `user_id` !
 
-La serialisation des messages en bytes a également été compliquée. La structure était trop complexe pour la gérer avec `struct.pack` et l'utilisation de JSON était impossible à cause de l'encodage des bytes.
+La sérialisation des messages en bytes a également été compliquée. La structure était trop complexe pour la gérer avec `struct.pack` et l'utilisation de JSON était impossible à cause de l'encodage des bytes.
 
-J'ai donc choisi d'utiliser la bibliothèque `pickle` qui permet de très simplement serialiser ce type d'objets en une ligne.
+J'ai donc choisi d'utiliser la bibliothèque `pickle` qui permet de très simplement sérialiser ce type d'objets en une ligne.
 
 ```py
 # Envoi
