@@ -12,16 +12,20 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 
 class AESEncryptedData(TypedDict):
-    data: bytes
-    iv: bytes
+    """
+    AES encrypted data
+    """
+    data: bytes  # encrypted data
+    iv: bytes  # initialization vector used to encrypt data
 
 
 class PGPPacket(TypedDict):
-    signature: AESEncryptedData
-    data: AESEncryptedData
-    secret_key: bytes
-
-
+    """
+    Encrypted data using PGP algorithm.
+    """
+    signature: AESEncryptedData  # encrypted compressed signature
+    data: AESEncryptedData  # encrypted compressed data
+    secret_key: bytes  # encrypted secret key used to encrypt signature and data
 
 
 class PGP:
